@@ -1,0 +1,90 @@
+import argparse
+import time
+import os
+from classifier import classifier
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Step 1: Get user inputs
+parser = argparse.ArgumentParser()
+parser.add_argument('--dir', type=str, default='pet_images/', help='Path to image folder')
+parser.add_argument('--dogfile', type=str, default='dognames.txt', help='File with dog names')
+args = parser.parse_args()
+
+# Step 2: Load dog names
+def load_dog_names(dogfile):
+    with open(dogfile, 'r') as f:
+        return set(line.strip().lower() for line in f)
+
+dog_names = load_dog_names(args.dogfile)
+
+# Step 3: Create pet labels
+def get_pet_labels(image_dir):
+    results = {}
+    for filename in os.listdir(image_dir):
+        if filename.startswith('.'): continue
+        label = ' '.join([word.lower() for word in filename.split('_') if word.isalpha()])
+        results[filename] = [label]
+    return results
+
+# Step 4: Classify and evaluate
+def evaluate_model(model_name, image_dir, dog_names):
+    results = get_pet_labels(image_dir)
+    start = time.time()
+    for filename in results:
+        path = image_dir + filename
+        pred = classifier(path, model_name).lower().strip()
+        true = results[filename][0]
+        match = true in pred
+        is_dog = true in dog_names
+        pred_dog = any(dog in pred for dog in dog_names)
+        results[filename].extend([pred, match, is_dog, pred_dog])
+    end = time.time()
+
+    # Step 5: Calculate stats
+    stats = {
+        'model': model_name,
+        'n_images': len(results),
+        'n_dogs': sum(1 for r in results.values() if r[3]),
+        'n_correct_dogs': sum(1 for r in results.values() if r[3] and r[4]),
+        'n_correct_not_dogs': sum(1 for r in results.values() if not r[3] and not r[4]),
+        'n_correct_breed': sum(1 for r in results.values() if r[3] and r[2]),
+        'runtime': end - start
+    }
+    return stats
+
+# Step 6: Run for all models
+models = ['alexnet', 'vgg', 'resnet']
+all_stats = [evaluate_model(m, args.dir, dog_names) for m in models]
+
+# Step 7: Visualize results
+df = pd.DataFrame({
+    'Model': [s['model'].capitalize() for s in all_stats],
+    'Dog Accuracy (%)': [100 * s['n_correct_dogs'] / s['n_dogs'] for s in all_stats],
+    'Breed Accuracy (%)': [100 * s['n_correct_breed'] / s['n_dogs'] for s in all_stats],
+    'Avg Runtime (s)': [s['runtime'] / s['n_images'] for s in all_stats]
+})
+
+print(df)
+
+# Bar charts
+plt.figure(figsize=(10, 4))
+plt.subplot(1, 2, 1)
+plt.bar(df['Model'], df['Dog Accuracy (%)'], color='skyblue')
+plt.title('Dog Identification Accuracy')
+plt.ylabel('%')
+
+plt.subplot(1, 2, 2)
+plt.bar(df['Model'], df['Breed Accuracy (%)'], color='lightgreen')
+plt.title('Breed Classification Accuracy')
+plt.ylabel('%')
+
+plt.tight_layout()
+plt.show()
+
+# Line chart for runtime
+plt.plot(df['Model'], df['Avg Runtime (s)'], marker='o', color='orange')
+plt.title('Average Runtime per Image')
+plt.ylabel('Seconds')
+plt.grid(True)
+plt.show()
